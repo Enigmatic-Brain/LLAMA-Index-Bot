@@ -1,7 +1,9 @@
+import json
 import re
+import traceback
 
+import requests
 import streamlit as st
-from openai import OpenAI
 
 try:
     from pygments.lexers import guess_lexer
@@ -87,8 +89,8 @@ with st.sidebar:
     )
     endpoint = st.text_input(
         "Endpoint URL",
-        placeholder="https://your-endpoint/v1",
-        help="Base URL of the OpenAI-compatible API. Must include the version path, e.g. https://host/v1 — the SDK appends /chat/completions automatically.",
+        placeholder="https://your-host/v1/chat/completions",
+        help="Full URL of the chat completions endpoint, e.g. https://your-host/v1/chat/completions",
     )
     temperature = st.slider(
         "Temperature",
@@ -136,29 +138,43 @@ if prompt:
         st.markdown(display_prompt)
 
     # Call the API and stream the response
-    client = OpenAI(api_key=api_key, base_url=endpoint)
-
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
 
         try:
-            stream = client.chat.completions.create(
-                model="default",
-                messages=st.session_state.messages,
-                temperature=temperature,
+            response = requests.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "messages": st.session_state.messages,
+                    "temperature": temperature,
+                    "stream": True,
+                },
                 stream=True,
             )
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
+            response.raise_for_status()
+
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                delta = chunk["choices"][0].get("delta", {}).get("content") or ""
                 full_response += delta
-                # Re-render incrementally so markdown / code blocks update live
                 response_placeholder.markdown(full_response + "▌")
 
             response_placeholder.markdown(full_response)
 
         except Exception as e:
-            import traceback
             full_response = (
                 f"**Error:** `{type(e).__name__}: {e}`\n\n"
                 f"```\n{traceback.format_exc()}\n```"
