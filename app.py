@@ -80,15 +80,23 @@ def maybe_wrap_code(text: str) -> str:
 with st.sidebar:
     st.title("Settings")
     api_key = st.text_input(
-        "OpenAI API Key",
+        "API Key",
         type="password",
-        placeholder="sk-...",
-        help="Your OpenAI API key. It is never stored.",
+        placeholder="Enter your API key",
+        help="Your API key. It is never stored.",
     )
-    model = st.selectbox(
-        "Model",
-        ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-        index=0,
+    endpoint = st.text_input(
+        "Endpoint URL",
+        placeholder="https://your-endpoint/v1",
+        help="The base URL of the OpenAI-compatible API endpoint.",
+    )
+    temperature = st.slider(
+        "Temperature",
+        min_value=0.0,
+        max_value=2.0,
+        value=0.7,
+        step=0.05,
+        help="Higher = more creative, lower = more deterministic.",
     )
     st.divider()
     if st.button("Clear conversation", use_container_width=True):
@@ -112,7 +120,10 @@ prompt = st.chat_input("Ask anything… (paste code directly — it will be form
 
 if prompt:
     if not api_key:
-        st.warning("Please enter your OpenAI API key in the sidebar first.")
+        st.warning("Please enter your API key in the sidebar first.")
+        st.stop()
+    if not endpoint:
+        st.warning("Please enter the endpoint URL in the sidebar first.")
         st.stop()
 
     # Auto-detect and wrap raw code pastes
@@ -125,7 +136,7 @@ if prompt:
         st.markdown(display_prompt)
 
     # Call the API and stream the response
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key, base_url=endpoint)
 
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
@@ -133,8 +144,9 @@ if prompt:
 
         try:
             stream = client.chat.completions.create(
-                model=model,
+                model="default",
                 messages=st.session_state.messages,
+                temperature=temperature,
                 stream=True,
             )
             for chunk in stream:
