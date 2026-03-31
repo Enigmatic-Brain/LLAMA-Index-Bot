@@ -88,7 +88,7 @@ with st.sidebar:
     endpoint = st.text_input(
         "Endpoint URL",
         placeholder="https://your-endpoint/v1",
-        help="The base URL of the OpenAI-compatible API endpoint.",
+        help="Base URL of the OpenAI-compatible API. Must include the version path, e.g. https://host/v1 — the SDK appends /chat/completions automatically.",
     )
     temperature = st.slider(
         "Temperature",
@@ -158,7 +158,11 @@ if prompt:
             response_placeholder.markdown(full_response)
 
         except Exception as e:
-            full_response = f"**Error:** {e}"
+            import traceback
+            full_response = (
+                f"**Error:** `{type(e).__name__}: {e}`\n\n"
+                f"```\n{traceback.format_exc()}\n```"
+            )
             response_placeholder.markdown(full_response)
 
     st.session_state.messages.append(
