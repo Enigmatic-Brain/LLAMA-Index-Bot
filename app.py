@@ -1,11 +1,80 @@
+import re
+
 import streamlit as st
 from openai import OpenAI
+
+try:
+    from pygments.lexers import guess_lexer
+    from pygments.util import ClassNotFound
+    PYGMENTS_AVAILABLE = True
+except ImportError:
+    PYGMENTS_AVAILABLE = False
 
 st.set_page_config(
     page_title="LLM Chat",
     page_icon="💬",
     layout="wide",
 )
+
+# ── Code auto-detection ───────────────────────────────────────────────────────
+
+# Patterns that strongly suggest code
+_CODE_PATTERNS = re.compile(
+    r"""
+    (^\s{4,}|\t)                          # 4-space or tab indentation
+    | (?:^|\s)(def|class|import|from|return|if|else|elif|for|while|try|except
+               |function|const|let|var|=>|async|await
+               |public|private|protected|static|void|int|str|bool
+               |\#include|\#define|namespace|using)(?:\s|$|\()
+    | [;{}]$                              # trailing ; { }
+    | ->|::|===|!==|&&|\|\|              # common operators
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+
+
+def maybe_wrap_code(text: str) -> str:
+    """
+    If `text` looks like raw source code (no existing fences), wrap it in a
+    fenced code block with an inferred language tag.
+    Returns the original text unchanged if it doesn't look like code.
+    """
+    stripped = text.strip()
+
+    # Already wrapped — leave it alone
+    if stripped.startswith("```"):
+        return text
+
+    lines = stripped.splitlines()
+
+    # Single-line inputs are almost never raw code pastes
+    if len(lines) < 2:
+        return text
+
+    # Count lines that match code patterns
+    matches = sum(1 for line in lines if _CODE_PATTERNS.search(line))
+    ratio = matches / len(lines)
+
+    # Need at least 30 % of lines to look like code before committing
+    if ratio < 0.30:
+        return text
+
+    # Try to detect the language with pygments
+    lang = ""
+    if PYGMENTS_AVAILABLE:
+        try:
+            lexer = guess_lexer(stripped)
+            # Only trust the guess if pygments is reasonably confident
+            # (analysisresult score is not exposed directly; use alias as a
+            # proxy — generic lexers like TextLexer have no useful aliases)
+            aliases = lexer.aliases
+            if aliases and aliases[0] not in ("text", "plain"):
+                lang = aliases[0]
+        except ClassNotFound:
+            pass
+
+    return f"```{lang}\n{stripped}\n```"
+
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -39,17 +108,21 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # ── Chat input ────────────────────────────────────────────────────────────────
-prompt = st.chat_input("Ask anything…")
+prompt = st.chat_input("Ask anything… (paste code directly — it will be formatted automatically)")
 
 if prompt:
     if not api_key:
         st.warning("Please enter your OpenAI API key in the sidebar first.")
         st.stop()
 
-    # Show user message immediately
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Auto-detect and wrap raw code pastes
+    display_prompt = maybe_wrap_code(prompt)
+
+    # Store the display version (with fences if code was detected) so the LLM
+    # also sees it as a code block, which improves its responses
+    st.session_state.messages.append({"role": "user", "content": display_prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(display_prompt)
 
     # Call the API and stream the response
     client = OpenAI(api_key=api_key)
